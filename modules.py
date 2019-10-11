@@ -4,6 +4,7 @@ import dgl.function as fn
 from dgl.nn.pytorch import edge_softmax
 from utlis import *
 from torch import nn
+from torch.nn.utils.rnn import pack_padded_sequence,pad_packed_sequence
 
 class MSA(nn.Module):
     def __init__(self, args, mode='normal'):

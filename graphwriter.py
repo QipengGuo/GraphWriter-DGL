@@ -2,7 +2,6 @@ import torch
 from modules import MSA, BiLSTM, GraphTrans  
 from utlis import *
 from torch import nn
-from torch.nn.utils.rnn import pack_padded_sequence,pad_packed_sequence
 import time
             
 class GraphWriter(nn.Module):
