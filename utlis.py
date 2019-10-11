@@ -278,6 +278,10 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
             ex = Example.from_json(json_data)
             ex.update_vocab(ent_vocab, rel_vocab, text_vocab)
             exs.append(ex)
+        if fname == fnames[0]:
+            t_exs = sorted(exs, key=lambda x:len(x))
+            print('Drop Train', len(t_exs[-1]), len(t_exs[-int(len(exs)*0.05)]))
+            exs = t_exs[:-int(len(exs)*0.05)] # drop 5% longest training sampels for saving memory and time
         datasets.append(exs)
     ent_vocab.build()
     rel_vocab.build()

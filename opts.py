@@ -37,7 +37,7 @@ def get_args():
     args.add_argument('--train_file', default='data/unprocessed.train.json', type=str)
     args.add_argument('--valid_file', default='data/unprocessed.val.json', type=str)
     args.add_argument('--test_file', default='data/unprocessed.test.json', type=str)
-    args.add_argument('--save_dataset', default='vocab.pickle', type=str)
+    args.add_argument('--save_dataset', default='data.pickle', type=str)
     args.add_argument('--save_model', default='saved_model.pt', type=str)
 
     args.add_argument('--gpu', default=0, type=int)
