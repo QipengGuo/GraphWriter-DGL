@@ -126,6 +126,9 @@ class GraphWriter(nn.Module):
                 beam_seq = torch.cat([beam_seq, new_beam_word.view(BSZ,-1)], 1)
                 _h, _c, ctx, beam_score = reorder_state(new_beam_idx.view(-1)//(2*beam_size), _h, _c, ctx, beam_score)
                 beam_score = new_beam_score.view(-1)
+                if (beam_best.unsqueeze(1).repeat(1,beam_size).view(-1)<beam_score).sum()==0:
+                    break
+
             return beam_best_seq, beam_best
                 
                 

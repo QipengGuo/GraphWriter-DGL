@@ -135,7 +135,10 @@ class Example(object):
     def build_graph(self):
         graph = dgl.DGLGraph()
         ent_len = len(self.raw_ent_text)
-        rel_len = len(self.raw_rel)
+        #rel_len = len(self.raw_rel)
+        rel_set = list(set([x[1] for x in self.raw_rel]))
+        rel_len = len(rel_set)
+
         graph.add_nodes(ent_len, {'type': torch.ones(ent_len) * NODE_TYPE['entity']})
         graph.add_nodes(1, {'type': torch.ones(1) * NODE_TYPE['root']})
         graph.add_nodes(rel_len*2, {'type': torch.ones(rel_len*2) * NODE_TYPE['relation']})
@@ -145,12 +148,20 @@ class Example(object):
         adj_edges = []
         for i, r in enumerate(self.raw_rel):
             assert len(r)==3, str(r)
-            st, _, ed = r
+            st, rt, ed = r
+#            if st not in self.raw_ent_text or ed not in self.raw_ent_text:
+#                print(r)
             st_ent, ed_ent = self.raw_ent_text.index(st), self.raw_ent_text.index(ed)
-            adj_edges.append([st_ent, ent_len+1+2*i])
-            adj_edges.append([ent_len+1+2*i, ed_ent])
-            adj_edges.append([ed_ent, ent_len+1+2*i-1])
-            adj_edges.append([ent_len+1+2*i-1, st_ent])
+            rt_idx = rel_set.index(rt)
+            #adj_edges.append([st_ent, ent_len+1+2*i])
+            #adj_edges.append([ent_len+1+2*i, ed_ent])
+            #adj_edges.append([ed_ent, ent_len+1+2*i-1])
+            #adj_edges.append([ent_len+1+2*i-1, st_ent])
+            adj_edges.append([st_ent, ent_len+1+rt_idx])
+            adj_edges.append([ent_len+1+rt_idx, ed_ent])
+            adj_edges.append([ed_ent, ent_len+1+rt_idx+rel_len])
+            adj_edges.append([ent_len+1+rt_idx+rel_len, st_ent])
+
         if len(adj_edges)>0:
             graph.add_edges(*list(map(list, zip(*adj_edges))))
         return graph
@@ -163,8 +174,11 @@ class Example(object):
             title = [text_vocab(x) for x in title_data]
             ent_text = [[text_vocab(y) for y in x] for x in self.raw_ent_text]
             ent_type = [text_vocab(x) for x in self.raw_ent_type] # for inference
-            rel_data = ['--root--'] + sum([[x[1],x[1]+'_INV'] for x in self.raw_rel], [])
+            #rel_data = ['--root--'] + sum([[x[1],x[1]+'_INV'] for x in self.raw_rel], [])
+            rel_set = list(set([x[1] for x in self.raw_rel]))
+            rel_data = ['--root--'] + rel_set + [x+'_INV' for x in rel_set] 
             rel = [rel_vocab(x) for x in rel_data]
+
             text_data = ['<BOS>'] + self.raw_text + ['<EOS>']
             text = [text_vocab(x) for x in text_data]
             tgt_text = []

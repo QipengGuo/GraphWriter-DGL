@@ -64,8 +64,8 @@ def test(model, dataloader, args):
         for batch in tq:
             with torch.no_grad():
                 beam_seq, beam_score = model(batch, beam_size=args.beam_size)
-            h = write_txt(batch, batch['tgt_text'], gold_file, args)
-            r = write_txt(batch, beam_seq, pred_file, args)
+            r = write_txt(batch, batch['tgt_text'], gold_file, args)
+            h = write_txt(batch, beam_seq, pred_file, args)
             hyp.extend(h)
             ref.extend(r)
     hyp = dict(zip(range(len(hyp)), hyp))
