@@ -157,10 +157,12 @@ class Example(object):
             #adj_edges.append([ent_len+1+2*i, ed_ent])
             #adj_edges.append([ed_ent, ent_len+1+2*i-1])
             #adj_edges.append([ent_len+1+2*i-1, st_ent])
-            adj_edges.append([st_ent, ent_len+1+rt_idx])
-            adj_edges.append([ent_len+1+rt_idx, ed_ent])
-            adj_edges.append([ed_ent, ent_len+1+rt_idx+rel_len])
-            adj_edges.append([ent_len+1+rt_idx+rel_len, st_ent])
+
+            # reverse graph for edge_softmax
+            adj_edges.append([ent_len+1+rt_idx, st_ent])
+            adj_edges.append([ed_ent, ent_len+1+rt_idx])
+            adj_edges.append([ent_len+1+rt_idx+rel_len, ed_ent])
+            adj_edges.append([st_ent, ent_len+1+rt_idx+rel_len])
 
         if len(adj_edges)>0:
             graph.add_edges(*list(map(list, zip(*adj_edges))))
@@ -294,8 +296,8 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
             exs.append(ex)
         if fname == fnames[0]:
             t_exs = sorted(exs, key=lambda x:len(x))
-            print('Drop Train', len(t_exs[-1]), len(t_exs[-int(len(exs)*0.05)]))
-            exs = t_exs[:-int(len(exs)*0.05)] # drop 5% longest training sampels for saving memory and time
+            print('Drop Train', len(t_exs[-1]), len(t_exs[-int(len(exs)*0.02)]))
+            exs = t_exs[:-int(len(exs)*0.02)] # drop 2% longest training sampels for saving memory and time
         datasets.append(exs)
     ent_vocab.build()
     rel_vocab.build()

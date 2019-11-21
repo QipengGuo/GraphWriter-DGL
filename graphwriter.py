@@ -25,15 +25,6 @@ class GraphWriter(nn.Module):
         self.copy_fc = nn.Linear(args.dec_ninp, 1)
         self.pred_v_fc = nn.Linear(args.dec_ninp, len(args.text_vocab))
 
-    def reset_parameter(self):
-        for n, p in self.named_parameters():
-            if 'emb' in n and p.ndim==2:
-                nn.init.xavier_uniform_(p)
-                #nn.init.uniform_(p, -0.05, 0.05)
-            elif p.ndim>1:
-                #nn.init.xavier_normal_(p)
-                nn.init.normal_(p, 0.0, 0.01)
-
     def enc_forward(self, batch, ent_mask, ent_text_mask, ent_len, rel_mask, title_mask):
         title_enc = None
         if self.args.title:
@@ -68,8 +59,9 @@ class GraphWriter(nn.Module):
                 outs.append(torch.cat([_h, ctx], 1)) 
             outs = torch.stack(outs, 1)
             copy_gate = torch.sigmoid(self.copy_fc(outs))
-            pred_v = torch.log(copy_gate) + torch.log_softmax(self.pred_v_fc(outs), -1)
-            pred_c = torch.log((1. - copy_gate)) + torch.log_softmax(self.copy_attn(outs, g_ent, mask=ent_mask), -1)
+            EPSI = 1e-6
+            pred_v = torch.log(copy_gate+EPSI) + torch.log_softmax(self.pred_v_fc(outs), -1)
+            pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, g_ent, mask=ent_mask), -1)
             pred = torch.cat([pred_v, pred_c], -1)
             return pred
         else:
@@ -113,7 +105,9 @@ class GraphWriter(nn.Module):
                 score, word = cum_score.topk(dim=-1, k=beam_size*2) # B, beam_size, 2*beam_size
                 eos_mask = word == self.args.text_vocab('<EOS>')
                 tmp_score = score.masked_fill(eos_mask, -1e8).view(B, -1)
+                LP = 1.0 #beam_seq.size(1) ** 1.0 # length penalty
                 tmp_best, tmp_best_idx = tmp_score.max(-1)
+                tmp_best = tmp_best / LP
                 for i, m in enumerate(beam_best):
                     if eos_mask[i].sum()==0:
                         continue
@@ -126,8 +120,8 @@ class GraphWriter(nn.Module):
                 beam_seq = torch.cat([beam_seq, new_beam_word.view(BSZ,-1)], 1)
                 _h, _c, ctx, beam_score = reorder_state(new_beam_idx.view(-1)//(2*beam_size), _h, _c, ctx, beam_score)
                 beam_score = new_beam_score.view(-1)
-                if (beam_best.unsqueeze(1).repeat(1,beam_size).view(-1)<beam_score).sum()==0:
-                    break
+                #if (beam_best.unsqueeze(1).repeat(1,beam_size).view(-1)<beam_score).sum()==0:
+                #    break
 
             return beam_best_seq, beam_best
                 

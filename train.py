@@ -20,19 +20,24 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch):
     losses = []
     st_time = time.time()
     with tqdm(dataloader, desc='Train Ep '+str(epoch), mininterval=60) as tq:
-        for batch in tq:
+        for i, batch in enumerate(tq):
             pred = model(batch)
             nll_loss = F.nll_loss(pred.view(-1, pred.shape[-1]), batch['tgt_text'].view(-1), ignore_index=0)
             loss = nll_loss
             optimizer.zero_grad()
             loss.backward()
-            #nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            nn.utils.clip_grad_norm_(model.parameters(), args.clip)
             optimizer.step()
             loss = loss.item()
             if loss!=loss:
                 raise ValueError('NaN appear')
             tq.set_postfix({'loss': loss}, refresh=False)
             losses.append(loss)
+            if i<args.warmup_step and epoch ==0:
+                optimizer.param_groups[0]['lr'] +=(1.-1e-2)*args.lr/args.warmup_step
+            else:
+                optimizer.param_groups[0]['lr'] -=(1.-1e-2)*args.lr/(args.epoch*len(tq)-args.warmup_step)
+
     print('Train Ep ', str(epoch), 'AVG Loss ', np.mean(losses), 'Steps ', len(losses), 'Time ', time.time()-st_time)
     torch.save(model, args.save_model)
          
@@ -91,7 +96,7 @@ def main(args):
                     shuffle=False, collate_fn=train_dataset.batch_fn)
 
     model = GraphWriter(args)
-    model.reset_parameter()
+    print(model)
     model.to(args.device)
     if args.test:
         model = torch.load(args.save_model)
@@ -99,11 +104,10 @@ def main(args):
         test(model, test_dataloader, args)
     else:
         #optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr*1e-2) # init warmup
         for epoch in range(args.epoch):
             train_one_epoch(model, train_dataloader, optimizer, args, epoch)
             eval_it(model, valid_dataloader, args, epoch)
-            optimizer.param_groups[0]['lr'] *= args.lr_decay
     
 if __name__ == '__main__':
     args = get_args()

@@ -15,28 +15,34 @@ class MSA(nn.Module):
         if mode=='normal':
             nhead, head_dim = args.nhead, args.head_dim
             qninp, kninp = args.nhid, args.nhid
-            self.WO = nn.Linear(nhead*head_dim, args.nhid)
         self.WQ = nn.Linear(qninp, nhead*head_dim)
-        self.WK = nn.Linear(kninp, nhead*head_dim)
-        self.WV = nn.Linear(kninp, nhead*head_dim)
+        self.attn_drop = nn.Dropout(args.attn_drop)
+        if mode!='copy':
+            self.WK = nn.Linear(kninp, nhead*head_dim)
+            self.WV = nn.Linear(kninp, nhead*head_dim)
+            self.WO = nn.Linear(nhead*head_dim, args.nhid)
         self.args, self.nhead, self.head_dim, self.mode = args, nhead, head_dim, mode
 
     def forward(self, inp1, inp2, mask=None):
         B, L2, H = inp2.shape
         NH, HD = self.nhead, self.head_dim
-        q, k, v = self.WQ(inp1), self.WK(inp2), self.WV(inp2)
+        if self.mode!='copy':
+            q, k, v = self.WQ(inp1), self.WK(inp2), self.WV(inp2)
+        else:
+            q, k, v = self.WQ(inp1), inp2, inp2
         L1 = 1 if inp1.ndim==2 else inp1.shape[1]
-        q = (q / math.sqrt(HD)).view(B, L1, NH, HD).permute(0, 2, 1, 3) 
+        if self.mode!='copy':
+            q = q / math.sqrt(HD)
+        q = q.view(B, L1, NH, HD).permute(0, 2, 1, 3) 
         k = k.view(B, L2, NH, HD).permute(0, 2, 3, 1)
         v = v.view(B, L2, NH, HD).permute(0, 2, 1, 3)
         pre_attn = torch.matmul(q,k)
         if mask is not None:
             pre_attn = pre_attn.masked_fill(mask[:,None,None,:], -1e8)
-            #pre_attn = pre_attn.masked_fill(mask[:,None,None,:], float('-inf'))
         if self.mode=='copy':
             return pre_attn.squeeze(1)
         else:
-            alpha = torch.softmax(pre_attn, -1)
+            alpha = self.attn_drop(torch.softmax(pre_attn, -1))
             attn = torch.matmul(alpha, v).permute(0, 2, 1, 3).contiguous().view(B,L1,NH*HD)
             ret = self.WO(attn)
             if inp1.ndim==2:
@@ -90,15 +96,7 @@ class GAT(nn.Module):
                 nn.Linear(4*in_feats, in_feats),
                 nn.Dropout(ffn_drop), # strange way, following the original code
             )
-        #self.reset_parameters()
         self._trans = trans
-
-    def reset_parameters(self):
-        """Reinitialize learnable parameters."""
-        gain = nn.init.calculate_gain('relu')
-        for p in self.parameters():
-            if p.ndim==2:
-                nn.init.xavier_normal_(p, gain=gain)
 
     def forward(self, graph, feat):
         """Compute graph attention network layer.
@@ -118,18 +116,18 @@ class GAT(nn.Module):
             is the number of heads, and :math:`D_{out}` is size of output feature.
         """
         graph = graph.local_var()
-        #h = feat.view(-1, self._num_heads, self._out_feats)
-        feat_c = feat.clone().detach().requires_grad_(False)
+        #feat_c = feat.clone().detach().requires_grad_(False)
+        feat_c = feat
         q, k, v = self.q_proj(feat), self.k_proj(feat_c), self.v_proj(feat_c)
         q = q.view(-1, self._num_heads, self._out_feats)
         k = k.view(-1, self._num_heads, self._out_feats)
         v = v.view(-1, self._num_heads, self._out_feats)
-        graph.ndata.update({'ft': q, 'el': k, 'er': v})
+        graph.ndata.update({'ft': v, 'el': k, 'er': q})
         # compute edge attention
-        graph.apply_edges(fn.u_add_v('el', 'er', 'e'))
-        e = math.sqrt(self._out_feats) * graph.edata.pop('e')
+        graph.apply_edges(fn.u_dot_v('el', 'er', 'e'))
+        e = graph.edata.pop('e') / math.sqrt(self._out_feats) 
         # compute softmax
-        graph.edata['a'] = self.attn_drop(edge_softmax(graph, e))
+        graph.edata['a'] = self.attn_drop(edge_softmax(graph, e)).unsqueeze(-1)
         # message passing
         graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
                          fn.sum('m', 'ft'))

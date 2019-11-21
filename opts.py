@@ -28,7 +28,7 @@ def get_args():
     args.add_argument('--beam_max_len', default=200, type=int)
     args.add_argument('--enc_lstm_layers', default=2, type=int)
     args.add_argument('--lr', default=1e-4, type=float)
-    args.add_argument('--lr_decay', default=0.9, type=float)
+    args.add_argument('--warmup_step', default=1000, type=float)
     args.add_argument('--clip', default=1, type=float)
     args.add_argument('--emb_drop', default=0.1, type=float)
     args.add_argument('--attn_drop', default=0.1, type=float)
