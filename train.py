@@ -39,7 +39,6 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch):
                 optimizer.param_groups[0]['lr'] -=(1.-1e-2)*args.lr/(args.epoch*len(tq)-args.warmup_step)
 
     print('Train Ep ', str(epoch), 'AVG Loss ', np.mean(losses), 'Steps ', len(losses), 'Time ', time.time()-st_time)
-    torch.save(model, args.save_model)
          
 def eval_it(model, dataloader, args, epoch):
     model.eval()
@@ -55,6 +54,7 @@ def eval_it(model, dataloader, args, epoch):
             tq.set_postfix({'loss': loss}, refresh=False)
             losses.append(loss)
     print('Eval Ep ', str(epoch), 'AVG Loss ', np.mean(losses), 'Steps ', len(losses), 'Time ', time.time()-st_time)
+    return np.mean(losses)
 
 def test(model, dataloader, args):
     scorer = Bleu(4)
@@ -105,9 +105,14 @@ def main(args):
     else:
         #optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr*1e-2) # init warmup
+        best_loss = 1e8
         for epoch in range(args.epoch):
             train_one_epoch(model, train_dataloader, optimizer, args, epoch)
-            eval_it(model, valid_dataloader, args, epoch)
+            val_loss = eval_it(model, valid_dataloader, args, epoch)
+            torch.save(model, args.save_model+str(epoch))
+            if val_loss < best_loss:
+                best_loss = val_loss
+                torch.save(model, args.save_model)
     
 if __name__ == '__main__':
     args = get_args()

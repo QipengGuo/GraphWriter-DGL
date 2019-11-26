@@ -32,14 +32,14 @@ class GraphWriter(nn.Module):
         ent_enc = self.ent_enc(self.ent_emb(batch['ent_text']), ent_text_mask, ent_len = batch['ent_len'])
         rel_emb = self.rel_emb(batch['rel'])
         g_ent, g_root = self.graph_enc(ent_enc, ent_mask, ent_len, rel_emb, rel_mask, batch['graph'])
-        return g_ent, g_root, title_enc 
+        return g_ent, g_root, title_enc, ent_enc
 
     def forward(self, batch, beam_size=None):
         ent_mask = len2mask(batch['ent_len'], self.args.device)
         ent_text_mask = batch['ent_text']==0
         rel_mask = batch['rel']==0 # 0 means the <PAD>
         title_mask = batch['title']==0
-        g_ent, g_root, title_enc = self.enc_forward(batch, ent_mask, ent_text_mask, batch['ent_len'], rel_mask, title_mask)
+        g_ent, g_root, title_enc, ent_enc = self.enc_forward(batch, ent_mask, ent_text_mask, batch['ent_len'], rel_mask, title_mask)
 
         _h, _c = g_root, g_root#.clone().detach()
         ctx = torch.zeros_like(g_root)
@@ -61,27 +61,15 @@ class GraphWriter(nn.Module):
             copy_gate = torch.sigmoid(self.copy_fc(outs))
             EPSI = 1e-6
             pred_v = torch.log(copy_gate+EPSI) + torch.log_softmax(self.pred_v_fc(outs), -1)
-            pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, g_ent, mask=ent_mask), -1)
+            pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, ent_enc, mask=ent_mask), -1)
             pred = torch.cat([pred_v, pred_c], -1)
             return pred
         else:
+            # force greedy
             device = g_ent.device
             B = g_ent.shape[0]
-            BSZ = B * beam_size
-            _h = _h.view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-            _c = _c.view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-            ent_mask = ent_mask.view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-            if self.args.title:
-                title_mask = title_mask.view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-                title_enc = title_enc.view(B, 1, title_enc.size(1), -1).repeat(1, beam_size, 1, 1).view(BSZ, title_enc.size(1), -1)
-            ctx = ctx.view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-            ent_type = batch['ent_type'].view(B, 1, -1).repeat(1, beam_size, 1).view(BSZ, -1)
-            g_ent = g_ent.view(B, 1, g_ent.size(1), -1).repeat(1, beam_size, 1, 1).view(BSZ, g_ent.size(1), -1)
-
-            beam_best = torch.zeros(B).to(device) - 1e8
-            beam_best_seq = [None] * B 
-            beam_seq = (torch.ones(BSZ).long().to(device) * self.args.text_vocab('<BOS>')).unsqueeze(1)
-            beam_score = torch.zeros(BSZ).to(device)
+            ent_type = batch['ent_type'].view(B, -1)
+            beam_seq = (torch.ones(B,).long().to(device) * self.args.text_vocab('<BOS>')).unsqueeze(1)
             for t in range(self.args.beam_max_len):
                 _inp = replace_ent(beam_seq[:,-1], ent_type, len(self.args.text_vocab))
                 xt = self.tar_emb(_inp)
@@ -94,41 +82,11 @@ class GraphWriter(nn.Module):
                 _y = torch.cat([_h, ctx], 1)
                 copy_gate = torch.sigmoid(self.copy_fc(_y))
                 pred_v = torch.log(copy_gate) + torch.log_softmax(self.pred_v_fc(_y), -1)
-                pred_c = torch.log((1. - copy_gate)) + torch.log_softmax(self.copy_attn(_y.unsqueeze(1), g_ent, mask=ent_mask).squeeze(1), -1)
-                pred = torch.cat([pred_v, pred_c], -1).view(B, beam_size, -1)
+                pred_c = torch.log((1. - copy_gate)) + torch.log_softmax(self.copy_attn(_y.unsqueeze(1), ent_enc, mask=ent_mask).squeeze(1), -1)
+                pred = torch.cat([pred_v, pred_c], -1).view(B,-1)
                 for ban_item in ['<BOS>', '<PAD>', '<UNK>']:
-                    pred[:, :, self.args.text_vocab(ban_item)] = -1e8
-                pred[:, beam_size:, self.args.text_vocab('<EOS>')] = -1e8
-                if t==self.args.beam_max_len-1: # force ending 
-                    pred[:, :beam_size, self.args.text_vocab('<EOS>')] = 1e8
-                cum_score = beam_score.view(B,beam_size,1) + pred
-                score, word = cum_score.topk(dim=-1, k=beam_size*2) # B, beam_size, 2*beam_size
-                eos_mask = word == self.args.text_vocab('<EOS>')
-                tmp_score = score.masked_fill(eos_mask, -1e8).view(B, -1)
-                LP = 1.0 #beam_seq.size(1) ** 1.0 # length penalty
-                tmp_best, tmp_best_idx = tmp_score.max(-1)
-                tmp_best = tmp_best / LP
-                for i, m in enumerate(beam_best):
-                    if eos_mask[i].sum()==0:
-                        continue
-                    if tmp_best[i]>m:
-                        beam_best_seq[i] = beam_seq[i*beam_size+tmp_best_idx[i]//(2*beam_size)]
-                        beam_best[i] = tmp_best[i]
-                score = score.masked_fill(eos_mask, -1e8) # B, beam_size, 2*beam_size
-                new_beam_score, new_beam_idx = score.view(B,-1).topk(dim=-1, k=beam_size)
-                new_beam_word = word.view(B,-1)[torch.arange(B).unsqueeze(1).to(word), new_beam_idx]
-                beam_seq = torch.cat([beam_seq, new_beam_word.view(BSZ,-1)], 1)
-                _h, _c, ctx, beam_score = reorder_state(new_beam_idx.view(-1)//(2*beam_size), _h, _c, ctx, beam_score)
-                beam_score = new_beam_score.view(-1)
-                #if (beam_best.unsqueeze(1).repeat(1,beam_size).view(-1)<beam_score).sum()==0:
-                #    break
-
-            return beam_best_seq, beam_best
-                
-                
-                
-               
-        
-        
-        
-        
+                    pred[:, self.args.text_vocab(ban_item)] = -1e8
+                _, word = pred.max(-1)
+                beam_seq = torch.cat([beam_seq, word.unsqueeze(1)], 1)
+            return beam_seq, None
+  

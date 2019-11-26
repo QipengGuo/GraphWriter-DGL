@@ -17,6 +17,8 @@ def write_txt(batch, seqs, w_file, args):
             else:
                 if int(token) not in [args.text_vocab(x) for x in ['<PAD>', '<BOS>', '<EOS>']]:
                     txt.append(args.text_vocab(int(token)))
+                if int(token) == args.text_vocab('<EOS>'):
+                    break
         w_file.write(' '.join([str(x) for x in txt])+'\n')
         ret.append([' '.join([str(x) for x in txt])])
     return ret 
