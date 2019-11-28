@@ -3,6 +3,8 @@ import dgl
 import numpy as np
 import json
 import pickle
+import random
+
 NODE_TYPE = {'entity': 0, 'root': 1, 'relation':2}
 
 def write_txt(batch, seqs, w_file, args):
@@ -17,8 +19,8 @@ def write_txt(batch, seqs, w_file, args):
             else:
                 if int(token) not in [args.text_vocab(x) for x in ['<PAD>', '<BOS>', '<EOS>']]:
                     txt.append(args.text_vocab(int(token)))
-                if int(token) == args.text_vocab('<EOS>'):
-                    break
+            if int(token) == args.text_vocab('<EOS>'):
+                break
         w_file.write(' '.join([str(x) for x in txt])+'\n')
         ret.append([' '.join([str(x) for x in txt])])
     return ret 
@@ -31,12 +33,6 @@ def replace_ent(x, ent, V):
     fill_ent = ent[nz, x[mask]-V]
     x = x.masked_scatter(mask, fill_ent)
     return x
-
-def reorder_state(new_order, *args):
-    ret = list(args)
-    for i in range(len(ret)):
-        ret[i] = ret[i].index_select(0, new_order)
-    return ret
 
 def len2mask(lens, device):
     max_len = max(lens)
@@ -137,9 +133,9 @@ class Example(object):
     def build_graph(self):
         graph = dgl.DGLGraph()
         ent_len = len(self.raw_ent_text)
-        #rel_len = len(self.raw_rel)
-        rel_set = list(set([x[1] for x in self.raw_rel]))
-        rel_len = len(rel_set)
+        rel_len = len(self.raw_rel)
+        #rel_set = list(set([x[1] for x in self.raw_rel]))
+        #rel_len = len(rel_set)
 
         graph.add_nodes(ent_len, {'type': torch.ones(ent_len) * NODE_TYPE['entity']})
         graph.add_nodes(1, {'type': torch.ones(1) * NODE_TYPE['root']})
@@ -151,36 +147,25 @@ class Example(object):
         for i, r in enumerate(self.raw_rel):
             assert len(r)==3, str(r)
             st, rt, ed = r
-#            if st not in self.raw_ent_text or ed not in self.raw_ent_text:
-#                print(r)
             st_ent, ed_ent = self.raw_ent_text.index(st), self.raw_ent_text.index(ed)
-            rt_idx = rel_set.index(rt)
-            #adj_edges.append([st_ent, ent_len+1+2*i])
-            #adj_edges.append([ent_len+1+2*i, ed_ent])
-            #adj_edges.append([ed_ent, ent_len+1+2*i-1])
-            #adj_edges.append([ent_len+1+2*i-1, st_ent])
-
-            # reverse graph for edge_softmax
-            adj_edges.append([ent_len+1+rt_idx, st_ent])
-            adj_edges.append([ed_ent, ent_len+1+rt_idx])
-            adj_edges.append([ent_len+1+rt_idx+rel_len, ed_ent])
-            adj_edges.append([st_ent, ent_len+1+rt_idx+rel_len])
+            adj_edges.append([ent_len+1+2*i, st_ent])
+            adj_edges.append([ed_ent, ent_len+1+2*i])
+            adj_edges.append([ent_len+1+2*i+1, ed_ent])
+            adj_edges.append([st_ent, ent_len+1+2*i+1])
 
         if len(adj_edges)>0:
             graph.add_edges(*list(map(list, zip(*adj_edges))))
         return graph
 
-    def get_tensor(self, ent_vocab, rel_vocab, text_vocab):
+    def get_tensor(self, ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab):
         if hasattr(self, '_cached_tensor'):
             return self._cached_tensor
         else:
             title_data = ['<BOS>'] + self.raw_title + ['<EOS>']
-            title = [text_vocab(x) for x in title_data]
-            ent_text = [[text_vocab(y) for y in x] for x in self.raw_ent_text]
+            title = [title_vocab(x) for x in title_data]
+            ent_text = [[ent_text_vocab(y) for y in x] for x in self.raw_ent_text]
             ent_type = [text_vocab(x) for x in self.raw_ent_type] # for inference
-            #rel_data = ['--root--'] + sum([[x[1],x[1]+'_INV'] for x in self.raw_rel], [])
-            rel_set = list(set([x[1] for x in self.raw_rel]))
-            rel_data = ['--root--'] + rel_set + [x+'_INV' for x in rel_set] 
+            rel_data = ['--root--'] + sum([[x[1],x[1]+'_INV'] for x in self.raw_rel], [])
             rel = [rel_vocab(x) for x in rel_data]
 
             text_data = ['<BOS>'] + self.raw_text + ['<EOS>']
@@ -193,42 +178,47 @@ class Example(object):
                     tgt_text.append(len(text_vocab)+int(b))
                 else:
                     tgt_text.append(text[i])
-            
             self._cached_tensor = {'title': torch.LongTensor(title), 'ent_text': [torch.LongTensor(x) for x in ent_text], \
                                 'ent_type': torch.LongTensor(ent_type), 'rel': torch.LongTensor(rel), \
                                 'text': torch.LongTensor(text[:-1]), 'tgt_text': torch.LongTensor(tgt_text[1:]), 'graph': self.graph, 'raw_ent_text': self.raw_ent_text}
             return self._cached_tensor
 
-    def update_vocab(self, ent_vocab, rel_vocab, text_vocab):
+    def update_vocab(self, ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab):
         ent_vocab.update(self.raw_ent_type)
+        ent_text_vocab.update(self.raw_ent_text)
+        title_vocab.update(self.raw_title)
         rel_vocab.update(['--root--']+[x[1] for x in self.raw_rel]+[x[1]+'_INV' for x in self.raw_rel])
         text_vocab.update(self.raw_ent_type)
-        text_vocab.update(self.raw_ent_text)
-        text_vocab.update(self.raw_title)
         text_vocab.update(self.raw_text)
 
 class BucketSampler(torch.utils.data.Sampler):
-    def __init__(self, data_source, batch_size=32, bucket=10):
+    def __init__(self, data_source, batch_size=32, bucket=3):
         self.data_source = data_source
         self.bucket = bucket
         self.batch_size = batch_size
 
     def __iter__(self):
-        idxs = torch.arange(len(self.data_source))
-        lens = torch.LongTensor([len(x) for x in self.data_source])
-        perm = torch.randperm(len(idxs))
-        idxs, lens = idxs[perm], lens[perm]
-        sp = len(idxs)//self.bucket * self.bucket
-        b_idxs = idxs[:sp].view(self.bucket, -1)
-        b_lens = lens[:sp].view(self.bucket, -1)
-        _, sidxs = b_lens.sort(dim=1)
-        s_idxs = b_idxs[torch.arange(self.bucket).unsqueeze(1), sidxs].view(-1)
-        idxs = torch.cat([s_idxs, idxs[sp:]], 0)
-        
+        perm = torch.randperm(len(self.data_source))
+        lens = torch.Tensor([len(x) for x in self.data_source])
+        lens = lens[perm]
+        t1 = []
+        t2 = []
+        t3 = []
+        for i, l in enumerate(lens):
+            if (l<100):
+                t1.append(perm[i])
+            elif (l>100 and l<220):
+                t2.append(perm[i])
+            else:
+                t3.append(perm[i])
+        datas = [t1,t2,t3]
+        random.shuffle(datas)
+        idxs = sum(datas, [])
         batch = []
         for idx in idxs:
             batch.append(idx)
-            if len(batch) == self.batch_size:
+            mlen = max([0]+[lens[x] for x in batch])
+            if (mlen<100 and len(batch) == 32) or (mlen>100 and mlen<220 and len(batch) >= 24) or (mlen>220 and len(batch)>=8) or len(batch)==32:
                 yield batch
                 batch = []
         if len(batch) > 0:
@@ -239,11 +229,11 @@ class BucketSampler(torch.utils.data.Sampler):
         
 
 class GWdataset(torch.utils.data.Dataset):
-    def __init__(self, exs, ent_vocab=None, rel_vocab=None, text_vocab=None, device=None):
+    def __init__(self, exs, ent_vocab=None, rel_vocab=None, text_vocab=None, ent_text_vocab=None, title_vocab=None, device=None):
         super(GWdataset, self).__init__()
         self.exs = exs
-        self.ent_vocab, self.rel_vocab, self.text_vocab, self.device = \
-        ent_vocab, rel_vocab, text_vocab, device
+        self.ent_vocab, self.rel_vocab, self.text_vocab, self.ent_text_vocab, self.title_vocab, self.device = \
+        ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab, device
 
     def __iter__(self):
         return iter(self.exs)
@@ -259,7 +249,7 @@ class GWdataset(torch.utils.data.Dataset):
         [], [], [], [], [], [], []
         batch_raw_ent_text = []
         for ex in batch_ex:
-            ex_data = ex.get_tensor(self.ent_vocab, self.rel_vocab, self.text_vocab)
+            ex_data = ex.get_tensor(self.ent_vocab, self.rel_vocab, self.text_vocab, self.ent_text_vocab, self.title_vocab)
             batch_title.append(ex_data['title'])
             batch_ent_text.append(ex_data['ent_text'])
             batch_ent_type.append(ex_data['ent_type'])
@@ -284,9 +274,11 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
     # min_freq : minimum frequency for the text vocab, don't affect on other vocabs
     # sep : seperator for storing data except the text vocab, the seperator of text vocab is always the '|||' 
     # joint_vocab : consider all the data when constructing vocabulary if true, otherwise only use the training data
-    ent_vocab = Vocab() 
-    rel_vocab = Vocab()
+    ent_vocab = Vocab(sp=['<PAD>', '<UNK>']) 
+    title_vocab = Vocab(min_freq=5) 
+    rel_vocab = Vocab(sp=['<PAD>', '<UNK>'])
     text_vocab = Vocab(min_freq=5)
+    ent_text_vocab = Vocab(sp=['<PAD>', '<UNK>'])
     datasets = []
     for fname in fnames:
         exs = []
@@ -294,17 +286,16 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
         for json_data in json_datas:
             # construct sinlge data example
             ex = Example.from_json(json_data)
-            ex.update_vocab(ent_vocab, rel_vocab, text_vocab)
+            if fname == fnames[0]:
+                ex.update_vocab(ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab)
             exs.append(ex)
-        if fname == fnames[0]:
-            t_exs = sorted(exs, key=lambda x:len(x))
-            print('Drop Train', len(t_exs[-1]), len(t_exs[-int(len(exs)*0.02)]))
-            exs = t_exs[:-int(len(exs)*0.02)] # drop 2% longest training sampels for saving memory and time
         datasets.append(exs)
     ent_vocab.build()
     rel_vocab.build()
     text_vocab.build()
-    datasets = [GWdataset(exs, ent_vocab, rel_vocab, text_vocab, device) for exs in datasets]
+    ent_text_vocab.build()
+    title_vocab.build()
+    datasets = [GWdataset(exs, ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab, device) for exs in datasets]
     with open(save, 'wb') as f:
         pickle.dump(datasets, f)
     return datasets
@@ -312,5 +303,5 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
 if __name__ == '__main__' :
     ds = get_datasets(['data/unprocessed.val.json', 'data/unprocessed.val.json', 'data/unprocessed.test.json'])
     print(ds[0].exs[0])
-    print(ds[0].exs[0].get_tensor(ds[0].ent_vocab, ds[0].rel_vocab, ds[0].text_vocab))
+    print(ds[0].exs[0].get_tensor(ds[0].ent_vocab, ds[0].rel_vocab, ds[0].text_vocab, ds[0].ent_text_vocab, ds[0].title_vocab))
 
