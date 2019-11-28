@@ -68,7 +68,7 @@ class GraphWriter(nn.Module):
             pred = torch.cat([pred_v, pred_c], -1)
             return pred
         else:
-            if beam_size==-1:
+            if beam_size==1:
                 # greedy
                 device = g_ent.device
                 B = g_ent.shape[0]
