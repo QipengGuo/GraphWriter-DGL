@@ -64,11 +64,11 @@ class GraphWriter(nn.Module):
             copy_gate = torch.sigmoid(self.copy_fc(outs))
             EPSI = 1e-6
             pred_v = torch.log(copy_gate+EPSI) + torch.log_softmax(self.pred_v_fc(outs), -1)
-            pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, g_ent, mask=ent_mask), -1)
+            pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, ent_enc, mask=ent_mask), -1)
             pred = torch.cat([pred_v, pred_c], -1)
             return pred
         else:
-            if beam_size==-1:
+            if beam_size==1:
                 # greedy
                 device = g_ent.device
                 B = g_ent.shape[0]

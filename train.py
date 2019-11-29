@@ -101,14 +101,15 @@ def main(args):
                     shuffle=False, collate_fn=train_dataset.batch_fn)
 
     model = GraphWriter(args)
-    print(model)
     model.to(args.device)
     if args.test:
         model = torch.load(args.save_model)
         model.args = args
+        print(model)
         test(model, test_dataloader, args)
     else:
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, momentum=0.9)
+        print(model)
         for epoch in range(args.epoch):
             train_one_epoch(model, train_dataloader, optimizer, args, epoch)
             eval_it(model, valid_dataloader, args, epoch)

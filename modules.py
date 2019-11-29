@@ -39,13 +39,11 @@ class MSA(nn.Module):
         pre_attn = torch.matmul(q,k)
         if mask is not None:
             pre_attn = pre_attn.masked_fill(mask[:,None,None,:], -1e8)
-            #pre_attn = pre_attn.masked_fill(mask[:,None,None,:], float('-inf'))
         if self.mode=='copy':
             return pre_attn.squeeze(1)
         else:
             alpha = self.attn_drop(torch.softmax(pre_attn, -1))
             attn = torch.matmul(alpha, v).permute(0, 2, 1, 3).contiguous().view(B,L1,NH*HD)
-            #ret = self.WO(attn)
             ret = attn
             if inp1.ndim==2:
                 return ret.squeeze(1)
@@ -99,16 +97,7 @@ class GAT(nn.Module):
                 nn.Linear(4*in_feats, in_feats),
                 nn.Dropout(0.1),
             )
-        #self.reset_parameters()
         self._trans = trans
-
-    def reset_parameters(self):
-        """Reinitialize learnable parameters."""
-        gain = nn.init.calculate_gain('relu')
-        for p in self.parameters():
-            if p.ndim==2:
-                #nn.init.normal_(p, 0.0, 0.05)
-                nn.init.xavier_uniform_(p, gain=gain)
 
     def forward(self, graph, feat):
         """Compute graph attention network layer.
@@ -129,45 +118,19 @@ class GAT(nn.Module):
         """
         graph = graph.local_var()
         feat_c = feat.clone().detach().requires_grad_(False)
-        #feat_c = feat
         q, k, v = self.q_proj(feat), self.k_proj(feat_c), self.v_proj(feat_c)
         q = q.view(-1, self._num_heads, self._out_feats)
         k = k.view(-1, self._num_heads, self._out_feats)
         v = v.view(-1, self._num_heads, self._out_feats)
         graph.ndata.update({'ft': v, 'el': k, 'er': q})
         # compute edge attention
-        #graph.apply_edges(fn.u_dot_v('el', 'er', 'e'))
         graph.apply_edges(fn.u_dot_v('el', 'er', 'e'))
         e =  graph.edata.pop('e') / math.sqrt(self._out_feats * self._num_heads)
-        #print(e.size(), e.sum(), e.view(-1).sort(descending=True)[0][:50])
-        # compute softmax
-        #graph.edata['a'] = self.attn_drop(edge_softmax(graph, e)).unsqueeze(-1)  # B*L1,N,L2  B*L1,N,H
         graph.edata['a'] = edge_softmax(graph, e).unsqueeze(-1)#/0.9  # B*L1,N,L2  B*L1,N,H
-        #a = graph.edata['a']
-        #print(graph.edges()[0])
-        #print(graph.edges()[1])
-        #bb = []
-        #cc = {}
-        #for i in range(10):
-        #    cc[i] = []
-        #for i, e1 in enumerate(graph.edges()[1]):
-        #    cc[int(e1)].append(e[i,0])
-        #for i in range(10):
-        #    if len(cc[i])>0:
-        #        bb.append(torch.softmax(torch.Tensor(cc[i]), -1).view(-1))
-        #        print(i, bb[-1])
-        #a = torch.cat(bb, 0)
-        #print(a.size(), a.sum(), a.view(-1).sort(descending=True)[0][:50])
-        #assert 1==6
-
-        #print(graph.edata['a'].view(-1)[:50])
-        #print(graph.edata['a'].view(-1).sum(), (graph.edata['a'].view(-1)>0.0).sum())
-        # message passing
+       # message passing
         graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
                          fn.sum('m', 'ft2'))
         rst = graph.ndata['ft2']
-        #print(rst.view(-1)[:50])
-        #assert 3==4
         # residual
         rst = rst.view(feat.shape) + feat
         if self._trans:
@@ -187,8 +150,6 @@ class GraphTrans(nn.Module):
 
     def forward(self, ent, ent_mask, ent_len, rel, rel_mask, graphs):
         device = ent.device
-#        if self.args.entdetach:
-#            ent = ent.clone().detach()
         ent_mask = (ent_mask==0) # reverse mask
         rel_mask = (rel_mask==0)
         init_h = []
@@ -198,7 +159,6 @@ class GraphTrans(nn.Module):
         init_h = torch.cat(init_h, 0)
         feats = init_h
         for i in range(self.prop):
-            #print('BBBB', i, '|', feats.view(-1)[:50])
             feats = self.gat[i](graphs, feats)
         g_root = feats.index_select(0, graphs.filter_nodes(lambda x: x.data['type']==NODE_TYPE['root']).to(device))
         g_ent = pad(feats.index_select(0, graphs.filter_nodes(lambda x: x.data['type']==NODE_TYPE['entity']).to(device)).split(ent_len), out_type='tensor')
