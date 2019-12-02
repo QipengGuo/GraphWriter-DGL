@@ -1,9 +1,24 @@
 # GraphWriter-DGL
+In this example we implement the GraphWriter, [Text Generation from Knowledge Graphs with Graph Transformers](https://arxiv.org/abs/1904.02342) in DGL. And the [author's code](https://github.com/rikdz/GraphWriter). 
 
+## Dependencies
+PyTorch >= 1.2  
+tqdm   
+pycoco 
+
+## Usage
+```
+  sh train.sh
+  sh test.sh
+```
+
+## Result on AGENDA
 | |BLEU|METEOR| training time per epoch|
 |-|-|-|-|
 |paper|14.3+-1.01| 18.8+-0.28| 1970s|
 |this repo|14.31+-0.34|19.74+-0.69| 1192s|
+
+We use the author's code for the speed test, and our testbed is V100 GPU.
 
 | |BLEU| detok BLEU| METEOR | 
 |-|-|-|-|
