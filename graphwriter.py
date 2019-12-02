@@ -2,7 +2,6 @@ import torch
 from modules import MSA, BiLSTM, GraphTrans  
 from utlis import *
 from torch import nn
-import time
 import dgl
             
 class GraphWriter(nn.Module):
@@ -50,6 +49,7 @@ class GraphWriter(nn.Module):
             attn = _h + self.title_attn(_h, title_enc, mask=title_mask)
             ctx = torch.cat([ctx, attn], 1)
         if beam_size<1:
+            # training
             outs = []
             tar_inp = self.tar_emb(batch['text'].transpose(0,1))
             for t, xt in enumerate(tar_inp):
@@ -63,6 +63,7 @@ class GraphWriter(nn.Module):
             outs = torch.stack(outs, 1)
             copy_gate = torch.sigmoid(self.copy_fc(outs))
             EPSI = 1e-6
+            # copy
             pred_v = torch.log(copy_gate+EPSI) + torch.log_softmax(self.pred_v_fc(outs), -1)
             pred_c = torch.log((1. - copy_gate)+EPSI) + torch.log_softmax(self.copy_attn(outs, ent_enc, mask=ent_mask), -1)
             pred = torch.cat([pred_v, pred_c], -1)
@@ -94,6 +95,7 @@ class GraphWriter(nn.Module):
                     seq = torch.cat([seq, word.unsqueeze(1)], 1)
                 return seq
             else:
+                # beam search
                 device = g_ent.device
                 B = g_ent.shape[0]
                 BSZ = B * beam_size
