@@ -8,6 +8,11 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence,pad_packed_sequence
 
 class MSA(nn.Module):
+    # multi-head self-attention, three modes
+    # the first is the copy, determining which entity should be copied.
+    # the second is the normal attention with two sequence inputs
+    # the third is the attention but with one token and a sequence. (gather, attentive pooling)
+    
     def __init__(self, args, mode='normal'):
         super(MSA, self).__init__()
         if mode=='copy':
@@ -51,6 +56,7 @@ class MSA(nn.Module):
                 return ret
 
 class BiLSTM(nn.Module):
+    # for entity encoding or the title encoding
     def __init__(self, args, enc_type='title'):
         super(BiLSTM, self).__init__()
         self.enc_type = enc_type
@@ -68,11 +74,12 @@ class BiLSTM(nn.Module):
             return y
         if self.enc_type=='entity':
             _h = _h.transpose(0,1).contiguous()
-            _h = _h[:,2:].view(_h.size(0), -1) # two directions of the top-layer
+            _h = _h[:,-2:].view(_h.size(0), -1) # two directions of the top-layer
             ret = pad(_h.split(ent_len), out_type='tensor')
             return ret
 
 class GAT(nn.Module):
+    # a graph attention network with dot-product attention
     def __init__(self,
                  in_feats,
                  out_feats,
@@ -97,36 +104,21 @@ class GAT(nn.Module):
                 nn.Linear(4*in_feats, in_feats),
                 nn.Dropout(0.1),
             )
+            # a strange FFN, see the author's code
         self._trans = trans
 
     def forward(self, graph, feat):
-        """Compute graph attention network layer.
-
-        Parameters
-        ----------
-        graph : DGLGraph
-            The graph.
-        feat : torch.Tensor
-            The input feature of shape :math:`(N, D_{in})` where :math:`D_{in}`
-            is size of input feature, :math:`N` is the number of nodes.
-
-        Returns
-        -------
-        torch.Tensor
-            The output feature of shape :math:`(N, H, D_{out})` where :math:`H`
-            is the number of heads, and :math:`D_{out}` is size of output feature.
-        """
         graph = graph.local_var()
         feat_c = feat.clone().detach().requires_grad_(False)
         q, k, v = self.q_proj(feat), self.k_proj(feat_c), self.v_proj(feat_c)
         q = q.view(-1, self._num_heads, self._out_feats)
         k = k.view(-1, self._num_heads, self._out_feats)
         v = v.view(-1, self._num_heads, self._out_feats)
-        graph.ndata.update({'ft': v, 'el': k, 'er': q})
+        graph.ndata.update({'ft': v, 'el': k, 'er': q}) # k,q instead of q,k, the edge_softmax is applied on incoming edges
         # compute edge attention
         graph.apply_edges(fn.u_dot_v('el', 'er', 'e'))
         e =  graph.edata.pop('e') / math.sqrt(self._out_feats * self._num_heads)
-        graph.edata['a'] = edge_softmax(graph, e).unsqueeze(-1)#/0.9  # B*L1,N,L2  B*L1,N,H
+        graph.edata['a'] = edge_softmax(graph, e).unsqueeze(-1)
        # message passing
         graph.update_all(fn.u_mul_e('ft', 'a', 'm'),
                          fn.sum('m', 'ft2'))
@@ -136,6 +128,7 @@ class GAT(nn.Module):
         if self._trans:
             rst = self.ln1(rst)
             rst = self.ln1(rst+self.FFN(rst))
+            # use the same layer norm, see the author's code
         return rst
 
 class GraphTrans(nn.Module):
@@ -143,6 +136,7 @@ class GraphTrans(nn.Module):
         super().__init__()
         self.args = args
         if args.graph_enc == "gat":
+            # we only support gtrans, don't use this one
             self.gat = nn.ModuleList([GAT(args.nhid, args.nhid//4, 4, attn_drop=args.attn_drop, trans=False) for _ in range(args.prop)]) #untested
         else:
             self.gat = nn.ModuleList([GAT(args.nhid, args.nhid//4, 4, attn_drop=args.attn_drop, ffn_drop=args.drop, trans=True) for _ in range(args.prop)])
