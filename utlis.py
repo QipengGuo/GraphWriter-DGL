@@ -290,7 +290,7 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
         exs = []
         json_datas = json.loads(open(fname).read())
         for json_data in json_datas:
-            # construct sinlge data example
+            # construct one data example
             ex = Example.from_json(json_data)
             if fname == fnames[0]: # only training set
                 ex.update_vocab(ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab)

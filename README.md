@@ -8,7 +8,7 @@ pycoco
 
 ## Usage
 ```
-  sh train.sh
+  sh run.sh
   sh test.sh
 ```
 
