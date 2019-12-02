@@ -8,10 +8,12 @@ import random
 NODE_TYPE = {'entity': 0, 'root': 1, 'relation':2}
 
 def write_txt(batch, seqs, w_file, args):
+    # converting the prediction to real text.
     ret = []
     for b, seq in enumerate(seqs):
         txt = []
         for token in seq:
+            # copy the entity
             if token>=len(args.text_vocab):
                 ent_text = batch['raw_ent_text'][b][token-len(args.text_vocab)]
                 ent_text = filter(lambda x:x!='<PAD>', ent_text)
@@ -26,6 +28,7 @@ def write_txt(batch, seqs, w_file, args):
     return ret 
 
 def replace_ent(x, ent, V):
+    # replace the entity
     mask = x>=V
     if mask.sum()==0:
         return x
@@ -99,6 +102,7 @@ class Vocab(object):
         pass
 
 def at_least(x):
+    # handling the illegal data
     if len(x) == 0:
         return ['<UNK>']
     else:
@@ -106,6 +110,7 @@ def at_least(x):
 
 class Example(object):
     def __init__(self, title, ent_text, ent_type, rel, text):
+        # one object corresponds to a data sample
         self.raw_title = title.split()
         self.raw_ent_text = [at_least(x.split()) for x in ent_text]
         assert min([len(x) for x in self.raw_ent_text])>0, str(self.raw_ent_text)
@@ -133,9 +138,7 @@ class Example(object):
     def build_graph(self):
         graph = dgl.DGLGraph()
         ent_len = len(self.raw_ent_text)
-        rel_len = len(self.raw_rel)
-        #rel_set = list(set([x[1] for x in self.raw_rel]))
-        #rel_len = len(rel_set)
+        rel_len = len(self.raw_rel) # treat the repeated relation as different nodes, refer to the author's code
 
         graph.add_nodes(ent_len, {'type': torch.ones(ent_len) * NODE_TYPE['entity']})
         graph.add_nodes(1, {'type': torch.ones(1) * NODE_TYPE['root']})
@@ -148,6 +151,7 @@ class Example(object):
             assert len(r)==3, str(r)
             st, rt, ed = r
             st_ent, ed_ent = self.raw_ent_text.index(st), self.raw_ent_text.index(ed)
+            # according to the edge_softmax operator, we need to reverse the graph
             adj_edges.append([ent_len+1+2*i, st_ent])
             adj_edges.append([ed_ent, ent_len+1+2*i])
             adj_edges.append([ent_len+1+2*i+1, ed_ent])
@@ -171,6 +175,7 @@ class Example(object):
             text_data = ['<BOS>'] + self.raw_text + ['<EOS>']
             text = [text_vocab(x) for x in text_data]
             tgt_text = []
+            # the input text and decoding target are different since the consideration of the copy mechanism.
             for i, str1 in enumerate(text_data):
                 if str1[0]=='<' and str1[-1]=='>' and '_' in str1:
                     a, b = str1[1:-1].split('_')
@@ -198,6 +203,7 @@ class BucketSampler(torch.utils.data.Sampler):
         self.batch_size = batch_size
 
     def __iter__(self):
+        # the magic number comes from the author's code
         perm = torch.randperm(len(self.data_source))
         lens = torch.Tensor([len(x) for x in self.data_source])
         lens = lens[perm]
@@ -271,9 +277,9 @@ class GWdataset(torch.utils.data.Dataset):
             'tgt_text': batch_tgt_text.to(self.device), 'graph': batch_graph, 'raw_ent_text': batch_raw_ent_text}
         
 def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, save='tmp.pickle'):
-    # min_freq : minimum frequency for the text vocab, don't affect on other vocabs
-    # sep : seperator for storing data except the text vocab, the seperator of text vocab is always the '|||' 
-    # joint_vocab : consider all the data when constructing vocabulary if true, otherwise only use the training data
+    # min_freq : not support now since it's very sensitive to the final results, but you can set it via passing min_freq to the Vocab class.
+    # sep : not support now
+    # joint_vocab : not support now
     ent_vocab = Vocab(sp=['<PAD>', '<UNK>']) 
     title_vocab = Vocab(min_freq=5) 
     rel_vocab = Vocab(sp=['<PAD>', '<UNK>'])
@@ -286,7 +292,7 @@ def get_datasets(fnames, min_freq=-1, sep=';', joint_vocab=True, device=None, sa
         for json_data in json_datas:
             # construct sinlge data example
             ex = Example.from_json(json_data)
-            if fname == fnames[0]:
+            if fname == fnames[0]: # only training set
                 ex.update_vocab(ent_vocab, rel_vocab, text_vocab, ent_text_vocab, title_vocab)
             exs.append(ex)
         datasets.append(exs)
